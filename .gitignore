@@ -1,0 +1,3 @@
+# Backup-Ordner nie ins Repo aufnehmen (wird vom Skript automatisch angelegt)
+backup/
+
