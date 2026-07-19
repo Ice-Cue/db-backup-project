@@ -30,11 +30,28 @@ Auswahl zu überspringen (z. B. für eigene Automatisierung):
 ./db-container-backup.sh restore <containername> <pfad-zur-backup-datei>   # vollständig manuell
 ```
 
+Findet das Skript über das Docker-Compose-Label `com.docker.compose.project`, dass es zum
+Datenbank-Container weitere Container im selben Compose-Projekt gibt, zeigt es diese an und fragt
+zusätzlich:
+
+```
+Folgende Container gehören zum selben Compose-Projekt (<projektname>):
+  - app-1
+  - worker-1
+Diese Container jetzt stoppen und nach dem Restore wieder starten? (ja/nein):
+```
+
+Bei `ja` werden sie vor dem Restore gestoppt und nach Abschluss (egal ob erfolgreich oder
+fehlgeschlagen) automatisch wieder gestartet. Voraussetzung: Die Anwendung läuft per Docker Compose
+und die Container tragen das entsprechende Label (bei `docker compose up` automatisch der Fall).
+Findet sich kein Compose-Projekt oder keine weiteren Container darin, entfällt die Nachfrage und das
+Restore läuft normal weiter.
+
 **Wichtig, für alle Datenbanktypen:**
 
 - Ein Restore überschreibt bestehende Daten. Vor jedem Restore ein frisches Backup des aktuellen Zustands erstellen.
 - Wenn möglich vorher in einer Testumgebung/Testcontainer prüfen, nicht direkt live.
-- Für ein garantiert sauberes Ergebnis: Anwendungscontainer, die auf die Datenbank zugreifen, vor dem Restore stoppen (`docker stop <containername>`) und danach wieder starten. Das Skript trennt bei PostgreSQL zwar automatisch aktive Verbindungen, laufende Anwendungen können sich aber sofort wieder neu verbinden und den Restore stören.
+- Für ein garantiert sauberes Ergebnis: Anwendungscontainer, die auf die Datenbank zugreifen, vor dem Restore stoppen (`docker stop <containername>`) und danach wieder starten — entweder manuell oder über die automatische Nachfrage im Compose-Fall (siehe oben). Das Skript trennt bei PostgreSQL zwar automatisch aktive Verbindungen, laufende Anwendungen können sich aber sofort wieder neu verbinden und den Restore stören.
 - Die manuellen Befehle in den folgenden Abschnitten sind als Referenz gedacht (z. B. falls das Skript nicht verfügbar ist) und spiegeln exakt das wider, was der Restore-Modus des Skripts automatisch macht.
 
 ---

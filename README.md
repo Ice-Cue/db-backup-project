@@ -9,9 +9,8 @@ Unterstützt MariaDB/MySQL, PostgreSQL, MongoDB, SQLite3 und Bitwarden/Vaultward
 db-backup-project/
 ├── db-container-backup.sh   # Haupt-/einziges Skript (Backup + Restore)
 ├── backup/                  # Backup-Dateien, nach Container sortiert (wird automatisch angelegt)
-├── docs/
-│   └── datenbank-restore-anleitung.md   # Ausführliche Restore-Anleitung
-└── CLAUDE.md                 # Kontext für Claude Code
+└── docs/
+    └── datenbank-restore-anleitung.md   # Ausführliche Restore-Anleitung
 ```
 
 ## Verwendung
@@ -20,7 +19,9 @@ db-backup-project/
 # Backup aller erkannten Container (z. B. per Cron)
 ./db-container-backup.sh
 
-# Interaktiver Restore (Datenbank + Backup-Datei werden zur Auswahl aufgelistet)
+# Interaktiver Restore (Datenbank + Backup-Datei werden zur Auswahl aufgelistet).
+# Findet das Skript weitere Container im selben Docker-Compose-Projekt, fragt es
+# zusätzlich, ob diese vor dem Restore gestoppt und danach wieder gestartet werden sollen.
 ./db-container-backup.sh restore
 ```
 

@@ -20,10 +20,14 @@ BACKUPDIR="$SCRIPT_DIR/backup"
 # Erkennt den Datenbanktyp automatisch anhand des Container-Images und ruft
 # das passende Restore-Kommando auf. Fragt vor dem eigentlichen Restore
 # interaktiv nach Bestätigung, da bestehende Daten überschrieben werden.
+# Findet das Skript über das Docker-Compose-Label "com.docker.compose.project"
+# weitere Container im selben Compose-Projekt, fragt es zusätzlich, ob diese vor
+# dem Restore gestoppt und danach wieder gestartet werden sollen.
 # ---------------------------------------------------------------------------
 restore_backup() {
     local CONTAINER="$1"
     local BACKUP_FILE="$2"
+    local DEPENDENT_CONTAINERS=()
 
     # Schritt 1: Datenbank (Container) interaktiv auswählen, falls nicht übergeben
     if [ -z "$CONTAINER" ]; then
@@ -93,9 +97,36 @@ restore_backup() {
     echo "diese Datenbank zugreifen, vorher gestoppt werden (docker stop <containername>)."
     echo "Bei PostgreSQL werden aktive Verbindungen zwar automatisch getrennt, laufende"
     echo "Anwendungen können sich aber sofort wieder neu verbinden und den Restore stören."
+
+    local PROJECT
+    PROJECT=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' "$CONTAINER" 2>/dev/null)
+    if [ -n "$PROJECT" ]; then
+        while IFS= read -r NAME; do
+            [ "$NAME" != "$CONTAINER" ] && DEPENDENT_CONTAINERS+=("$NAME")
+        done < <(docker ps --filter "label=com.docker.compose.project=$PROJECT" --format '{{.Names}}')
+    fi
+
+    if [ ${#DEPENDENT_CONTAINERS[@]} -gt 0 ]; then
+        echo ""
+        echo "Folgende Container gehören zum selben Compose-Projekt ($PROJECT):"
+        printf '  - %s\n' "${DEPENDENT_CONTAINERS[@]}"
+        read -p "Diese Container jetzt stoppen und nach dem Restore wieder starten? (ja/nein): " STOP_CONFIRM
+        if [ "$STOP_CONFIRM" = "ja" ]; then
+            docker stop "${DEPENDENT_CONTAINERS[@]}" > /dev/null
+            echo "Gestoppt."
+        else
+            echo "Container werden nicht gestoppt."
+            DEPENDENT_CONTAINERS=()
+        fi
+    fi
+
     read -p "Restore wirklich durchführen? Bestehende Daten werden überschrieben! (ja/nein): " CONFIRM
     if [ "$CONFIRM" != "ja" ]; then
         echo "Abgebrochen."
+        if [ ${#DEPENDENT_CONTAINERS[@]} -gt 0 ]; then
+            echo "Starte zuvor gestoppte Container wieder..."
+            docker start "${DEPENDENT_CONTAINERS[@]}" > /dev/null
+        fi
         exit 0
     fi
 
@@ -170,8 +201,14 @@ restore_backup() {
             exit 1
             ;;
     esac
+    local RESTORE_STATUS=$?
 
-    if [ $? -eq 0 ]; then
+    if [ ${#DEPENDENT_CONTAINERS[@]} -gt 0 ]; then
+        echo "Starte zuvor gestoppte Container wieder..."
+        docker start "${DEPENDENT_CONTAINERS[@]}" > /dev/null
+    fi
+
+    if [ $RESTORE_STATUS -eq 0 ]; then
         echo "Restore abgeschlossen."
     else
         echo "FEHLER: Restore fehlgeschlagen."
