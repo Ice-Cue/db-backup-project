@@ -227,7 +227,7 @@ if [ ! -d $BACKUPDIR ]; then
 fi
 # Backup für MySQL/MariaDB-Container
 CONTAINER=$(docker ps --format '{{.Names}}:{{.Image}}' | grep 'mysql\|mariadb' | cut -d":" -f1)
-echo "Erstelle Backup für MySQL/MariaDB-Container: $CONTAINER"
+[ -n "$CONTAINER" ] && echo "Erstelle Backup für MySQL/MariaDB-Container: $CONTAINER"
 for i in $CONTAINER; do
     # Deckt sowohl alte (MYSQL_*) als auch neue (MARIADB_*) Variablennamen ab
     MYSQL_DATABASE=$(docker exec "$i" env | grep -E '^(MYSQL_DATABASE|MARIADB_DATABASE)=' | head -n1 | cut -d"=" -f2-)
@@ -274,7 +274,7 @@ for i in $CONTAINER; do
 done
 # Backup für PostgreSQL-Container
 PG_CONTAINER=$(docker ps --format '{{.Names}}:{{.Image}}' | grep 'postgres' | cut -d":" -f1)
-echo "Erstelle Backup für PostgreSQL-Container: $PG_CONTAINER"
+[ -n "$PG_CONTAINER" ] && echo "Erstelle Backup für PostgreSQL-Container: $PG_CONTAINER"
 for i in $PG_CONTAINER; do
     POSTGRES_DB=$(docker exec "$i" env | grep -E '^POSTGRES_DB=' | head -n1 | cut -d"=" -f2-)
     POSTGRES_USER=$(docker exec "$i" env | grep -E '^POSTGRES_USER=' | head -n1 | cut -d"=" -f2-)
@@ -319,7 +319,7 @@ for i in $PG_CONTAINER; do
 done
 # Backup für MongoDB-Container
 MONGO_CONTAINER=$(docker ps --format '{{.Names}}:{{.Image}}' | grep 'mongo' | cut -d":" -f1)
-echo "Erstelle Backup für MongoDB-Container: $MONGO_CONTAINER"
+[ -n "$MONGO_CONTAINER" ] && echo "Erstelle Backup für MongoDB-Container: $MONGO_CONTAINER"
 for i in $MONGO_CONTAINER; do
     CONTAINER_BACKUP_DIR="$BACKUPDIR/$i"
     mkdir -p "$CONTAINER_BACKUP_DIR"
@@ -330,7 +330,7 @@ for i in $MONGO_CONTAINER; do
 done
 # Backup für SQLite3-Container
 SQLITE_CONTAINERS=$(docker ps --format '{{.Names}}:{{.Image}}' | grep 'sqlite' | cut -d":" -f1)
-echo "Erstelle Backup für SQLite3-Container: $SQLITE_CONTAINERS"
+[ -n "$SQLITE_CONTAINERS" ] && echo "Erstelle Backup für SQLite3-Container: $SQLITE_CONTAINERS"
 for i in $SQLITE_CONTAINERS; do
     SQLITE_BACKUP_DIR="$BACKUPDIR/$i"
     mkdir -p "$SQLITE_BACKUP_DIR"
@@ -342,7 +342,7 @@ for i in $SQLITE_CONTAINERS; do
 done
 # Backup für Bitwarden-Container
 BITWARDEN_CONTAINERS=$(docker ps --format '{{.Names}}:{{.Image}}' | grep 'bitwardenrs' | cut -d":" -f1)
-echo "Erstelle Backup für Bitwarden-Container: $BITWARDEN_CONTAINERS"
+[ -n "$BITWARDEN_CONTAINERS" ] && echo "Erstelle Backup für Bitwarden-Container: $BITWARDEN_CONTAINERS"
 for i in $BITWARDEN_CONTAINERS; do
     BITWARDEN_BACKUP_DIR="$BACKUPDIR/$i"
     mkdir -p "$BITWARDEN_BACKUP_DIR"
