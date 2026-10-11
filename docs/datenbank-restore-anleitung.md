@@ -171,6 +171,43 @@ zcat <skriptverzeichnis>/backup/$CONTAINER/bitwarden-<JJJJMMDDHHMM>.sql.gz \
 
 ---
 
+## 6. SQLite-Dateien auf dem Host (automatisch gefunden)
+
+Das Skript sucht selbst nach SQLite-Datenbanken (z. B. von Dashboards, VPN- oder Monitoring-Containern, die ihre Datenbank als Datei in einem gemounteten Ordner ablegen) und sichert sie konsistent mit `sqlite3 .backup` (auch bei laufender Anwendung, WAL-Dateien eingeschlossen). Anschließend wird die Kopie mit `PRAGMA quick_check` geprüft.
+
+Ablage: `<skriptverzeichnis>/backup/_sqlite-dateien/<pfad-mit-doppelten-unterstrichen>/<dateiname>-<JJJJMMDDHHMM>.gz`. Der Ordnername ist der vollständige Pfad der Originaldatei, wobei `/` durch `__` ersetzt ist (z. B. `opt__containers__app__data__app.db`). Der Inhalt ist eine gzip-komprimierte SQLite-Datei (kein SQL-Text). Der Ordner `_sqlite-dateien` erscheint absichtlich nicht in der Auswahl des interaktiven Restore-Modus.
+
+**Wiederherstellen (manuell):**
+
+```bash
+ZIEL=<pfad-der-originaldatei>
+
+# 1. Anwendung stoppen, die die Datei benutzt
+docker stop <containername>
+
+# 2. Bestehende Datei und Begleitdateien beiseite legen
+mv "$ZIEL" "$ZIEL.bak"
+rm -f "$ZIEL-wal" "$ZIEL-shm"
+
+# 3. Gesicherte Datei zurückkopieren
+gunzip -c <skriptverzeichnis>/backup/_sqlite-dateien/<ordner>/<dateiname>-<JJJJMMDDHHMM>.gz > "$ZIEL"
+
+# 4. Anwendung wieder starten
+docker start <containername>
+```
+
+**Suche anpassen** (per Umgebungsvariable beim Aufruf oder oben im Skript):
+
+| Variable | Bedeutung | Standard |
+|---|---|---|
+| `SQLITE_SEARCH_PATHS` | Suchordner, durch Leerzeichen getrennt | `/opt/containers` |
+| `SQLITE_MAXDEPTH` | maximale Suchtiefe | `6` |
+| `SQLITE_EXCLUDE` | Ausschlussmuster (Shell-Glob), durch Doppelpunkt getrennt | Backup-Ordner, `.git`, `node_modules`, Duplicati-Auftragsdatenbanken |
+
+Gefunden werden Dateien mit der Endung `.db`, `.sqlite` oder `.sqlite3`, die tatsächlich den SQLite-Kopf (`SQLite format 3`) haben. Andere Formate (z. B. BoltDB, LevelDB, Redis-RDB) werden nicht erfasst. Schlägt eine Sicherung fehl, liegt daneben eine `.err.log`-Datei. Ohne installiertes `sqlite3` (`apt install sqlite3`) gibt das Skript eine Warnung aus und überspringt diesen Teil.
+
+---
+
 ## Kurzreferenz: Backup-Verzeichnisstruktur
 
 ```

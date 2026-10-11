@@ -2,8 +2,16 @@
 # Backup-Skript für Datenbank-Container
 # ---
 # Dieses Skript kann verwendet werden, um automatisch Backups von Datenbanken in Docker-Containern zu erstellen.
-# Es unterstützt derzeit MySQL, MariaDB, PostgreSQL, MongoDB und SQLite3.
+# Es unterstützt derzeit MySQL, MariaDB, PostgreSQL, MongoDB und SQLite3 (in Containern) sowie
+# SQLite-Dateien, die das Skript selbst auf dem Host findet (siehe unten, Abschnitt "SQLite-Dateien").
 DAYS=1
+# SQLite-Dateien auf dem Host automatisch suchen und sichern (jeweils per Umgebungsvariable änderbar):
+#   SQLITE_SEARCH_PATHS  Suchordner, durch Leerzeichen getrennt (Standard: /opt/containers)
+#   SQLITE_MAXDEPTH      maximale Suchtiefe (Standard: 6)
+#   SQLITE_EXCLUDE       Ausschlussmuster (Shell-Glob), durch Doppelpunkt getrennt
+SQLITE_SEARCH_PATHS="${SQLITE_SEARCH_PATHS:-/opt/containers}"
+SQLITE_MAXDEPTH="${SQLITE_MAXDEPTH:-6}"
+SQLITE_EXCLUDE="${SQLITE_EXCLUDE:-*/backup/*:*/.git/*:*/node_modules/*:*/duplicati/config/backup/*:*/duplicati/config/backup *:*/duplicati/config/[A-Z][A-Z][A-Z][A-Z][A-Z][A-Z][A-Z][A-Z][A-Z][A-Z].sqlite}"
 # Backup-Ordner liegt immer im selben Verzeichnis wie dieses Skript (Unterordner "backup")
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKUPDIR="$SCRIPT_DIR/backup"
@@ -38,7 +46,7 @@ restore_backup() {
             DBS+=("$dir")
             echo "  $idx) $dir"
             idx=$((idx+1))
-        done < <(find "$BACKUPDIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort)
+        done < <(find "$BACKUPDIR" -mindepth 1 -maxdepth 1 -type d ! -name '_*' -printf '%f\n' 2>/dev/null | sort)
 
         if [ ${#DBS[@]} -eq 0 ]; then
             echo "FEHLER: Keine Backups in $BACKUPDIR gefunden."
@@ -352,4 +360,54 @@ for i in $BITWARDEN_CONTAINERS; do
 
     find "$BITWARDEN_BACKUP_DIR" -name "*.gz" -daystart -mtime +$DAYS -delete
 done
+# SQLite-Dateien auf dem Host (z. B. von Dashboards, VPN- oder Monitoring-Containern, die ihre Datenbank als Datei in
+# einem gemounteten Ordner ablegen und deshalb von keiner der Container-Suchen oben erfasst werden).
+# Gesucht wird in $SQLITE_SEARCH_PATHS nach *.db, *.sqlite und *.sqlite3; als Datenbank gilt eine Datei nur, wenn sie
+# den SQLite-Kopf ("SQLite format 3") hat. Gesichert wird mit "sqlite3 .backup" (konsistent auch bei laufender Anwendung,
+# WAL-Dateien eingeschlossen) und danach mit "PRAGMA quick_check" geprüft.
+sqlite_ausgeschlossen() {
+    local f="$1" muster
+    local -a MUSTER
+    IFS=: read -ra MUSTER <<< "$SQLITE_EXCLUDE"
+    for muster in "${MUSTER[@]}"; do
+        [[ "$f" == $muster ]] && return 0
+    done
+    return 1
+}
+SQLITE_BIN=$(command -v sqlite3)
+SQLITE_DATEIEN=()
+for suchpfad in $SQLITE_SEARCH_PATHS; do
+    [ -d "$suchpfad" ] || continue
+    while IFS= read -r -d '' datei; do
+        sqlite_ausgeschlossen "$datei" && continue
+        [ "$(head -c 15 "$datei" 2>/dev/null | tr -d '\0')" = "SQLite format 3" ] || continue
+        SQLITE_DATEIEN+=("$datei")
+    done < <(find "$suchpfad" -maxdepth "$SQLITE_MAXDEPTH" -type f \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) -size +0 -print0 2>/dev/null)
+done
+if [ ${#SQLITE_DATEIEN[@]} -gt 0 ]; then
+    echo "Erstelle Backup für SQLite-Dateien auf dem Host: ${#SQLITE_DATEIEN[@]} gefunden"
+    if [ -z "$SQLITE_BIN" ]; then
+        echo "WARNUNG: sqlite3 ist nicht installiert (apt install sqlite3) – SQLite-Dateien übersprungen."
+    else
+        for datei in "${SQLITE_DATEIEN[@]}"; do
+            # Zielordner: vollständiger Pfad mit "__" statt "/", damit gleiche Dateinamen sich nicht überschneiden
+            ZIELNAME=$(echo "${datei#/}" | sed 's|/|__|g')
+            SQLITE_BACKUP_DIR="$BACKUPDIR/_sqlite-dateien/$ZIELNAME"
+            mkdir -p "$SQLITE_BACKUP_DIR"
+            STAMP=$(date +"%Y%m%d%H%M")
+            BASIS=$(basename "$datei")
+            ERROR_LOG="$SQLITE_BACKUP_DIR/$BASIS-$STAMP.err.log"
+            TMP_DB=$(mktemp "$SQLITE_BACKUP_DIR/.tmp.XXXXXX")
+            if "$SQLITE_BIN" "$datei" ".backup '$TMP_DB'" 2>"$ERROR_LOG" \
+                && [ "$("$SQLITE_BIN" "$TMP_DB" 'PRAGMA quick_check;' 2>>"$ERROR_LOG" | head -n1)" = "ok" ]; then
+                gzip -c "$TMP_DB" > "$SQLITE_BACKUP_DIR/$BASIS-$STAMP.gz"
+                rm -f "$ERROR_LOG"
+                find "$SQLITE_BACKUP_DIR" -name "*.gz" -daystart -mtime +$DAYS -delete
+            else
+                echo "FEHLER: Backup der SQLite-Datei $datei fehlgeschlagen, siehe $ERROR_LOG"
+            fi
+            rm -f "$TMP_DB"
+        done
+    fi
+fi
 echo "$(date +"%Y-%m-%d %H:%M:%S") Backup der Datenbanken abgeschlossen"

@@ -1,7 +1,7 @@
 # db-backup-project
 
 Bash-Skript zum automatischen Backup und Restore von Datenbanken in Docker-Containern.
-Unterstützt MariaDB/MySQL, PostgreSQL, MongoDB, SQLite3 und Bitwarden/Vaultwarden.
+Unterstützt MariaDB/MySQL, PostgreSQL, MongoDB, SQLite3 und Bitwarden/Vaultwarden in Containern. Zusätzlich sucht das Skript selbst nach SQLite-Dateien auf dem Host (z. B. die Datenbank eines Dashboards oder VPN-Containers) und sichert sie konsistent mit `sqlite3 .backup`.
 
 ## Struktur
 
@@ -27,6 +27,10 @@ db-backup-project/
 
 Details, Overwrite-Verhalten je Datenbanktyp und bekannte Einschränkungen: siehe
 `docs/datenbank-restore-anleitung.md`.
+
+## SQLite-Dateien auf dem Host
+
+Standardmäßig wird unter `/opt/containers` (Tiefe 6) nach `*.db`, `*.sqlite` und `*.sqlite3` mit echtem SQLite-Kopf gesucht. Die Sicherungen liegen unter `backup/_sqlite-dateien/<pfad-mit-__>/`. Suchordner, Tiefe und Ausschlüsse lassen sich per Umgebungsvariable ändern (`SQLITE_SEARCH_PATHS`, `SQLITE_MAXDEPTH`, `SQLITE_EXCLUDE`), Details und Restore siehe `docs/datenbank-restore-anleitung.md`. Voraussetzung: `sqlite3` auf dem Host.
 
 ## Installation auf dem Server
 
