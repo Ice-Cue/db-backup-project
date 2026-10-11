@@ -1,8 +1,8 @@
 # Anleitung: Datenbank-Backups wiederherstellen
 
-Gilt für die Backups aus `/opt/db-backup/db-container-backup.sh`. Der Backup-Ordner liegt
+Gilt für die Backups aus `<skriptverzeichnis>/db-container-backup.sh`. Der Backup-Ordner liegt
 automatisch im selben Verzeichnis wie das Skript (Unterordner `backup/`), also
-`/opt/db-backup/backup/<containername>/` (wenn das Skript in `/opt/db-backup/` liegt).
+`<skriptverzeichnis>/backup/<containername>/`.
 
 ---
 
@@ -12,7 +12,7 @@ Das Skript hat einen eingebauten Restore-Modus, der Container und Backup-Datei a
 aus dem Backup-Ordner auflistet – kein manueller Pfad nötig:
 
 ```bash
-cd /opt/db-backup
+cd <skriptverzeichnis>
 ./db-container-backup.sh restore
 ```
 
@@ -63,14 +63,14 @@ DB_CLIENT=$(docker exec "$CONTAINER" sh -c 'command -v mariadb || command -v mys
 **Einzelne Datenbank wiederherstellen:**
 
 ```bash
-zcat /opt/db-backup/backup/$CONTAINER/<dbname>-<JJJJMMDDHHMM>.sql.gz \
+zcat <skriptverzeichnis>/backup/$CONTAINER/<dbname>-<JJJJMMDDHHMM>.sql.gz \
     | docker exec -i -e MYSQL_PWD="$MYSQL_PWD" "$CONTAINER" "$DB_CLIENT" -u root <dbname>
 ```
 
 **Kompletten `all-databases`-Dump wiederherstellen** (Dump enthält bereits `CREATE DATABASE`/`USE`, daher ohne Datenbanknamen einspielen):
 
 ```bash
-zcat /opt/db-backup/backup/$CONTAINER/all-databases-<JJJJMMDDHHMM>.sql.gz \
+zcat <skriptverzeichnis>/backup/$CONTAINER/all-databases-<JJJJMMDDHHMM>.sql.gz \
     | docker exec -i -e MYSQL_PWD="$MYSQL_PWD" "$CONTAINER" "$DB_CLIENT" -u root
 ```
 
@@ -101,45 +101,22 @@ docker exec -e PGPASSWORD="$POSTGRES_PWD" "$CONTAINER" psql -U postgres -d postg
 **Einzelne Datenbank wiederherstellen:**
 
 ```bash
-zcat /opt/db-backup/backup/$CONTAINER/<dbname>-<JJJJMMDDHHMM>.sql.gz \
+zcat <skriptverzeichnis>/backup/$CONTAINER/<dbname>-<JJJJMMDDHHMM>.sql.gz \
     | docker exec -i -e PGPASSWORD="$POSTGRES_PWD" "$CONTAINER" psql -U postgres -d <dbname>
 ```
 
 **Kompletten `all-databases`-Dump wiederherstellen** (enthält `\connect`-Befehle für jede Datenbank):
 
 ```bash
-zcat /opt/db-backup/backup/$CONTAINER/all-databases-<JJJJMMDDHHMM>.sql.gz \
+zcat <skriptverzeichnis>/backup/$CONTAINER/all-databases-<JJJJMMDDHHMM>.sql.gz \
     | docker exec -i -e PGPASSWORD="$POSTGRES_PWD" "$CONTAINER" psql -U postgres -d postgres
 ```
 
-### Bekannte Einschränkung: Datenbank mit nicht schema-qualifizierten Funktionen
+### Hinweis: Restore scheitert an Funktionen ohne Schema-Präfix
 
-Manche Anwendungsdatenbanken lassen sich mit einem Standard-Restore nicht vollständig einspielen. Typisches Fehlerbild beim Anlegen einer Tabelle:
+`pg_dump` setzt zu Beginn jedes Datenbank-Abschnitts den `search_path` auf leer. Ruft eine Funktion der eigenen Anwendung intern andere Funktionen oder Erweiterungen **ohne Schema-Präfix** auf, schlägt der Restore beim Anlegen von Tabellen mit Fehlern wie `function ... does not exist` fehl (vor allem bei generierten Spalten); abhängige Views, Indizes und Trigger scheitern danach in Folge.
 
-```
-ERROR:  function xyz(unknown, text) does not exist
-CONTEXT:  SQL function "xyz_wrapper" during inlining
-```
-
-**Ursache:** `pg_dump` setzt zu Beginn jedes Datenbank-Abschnitts aus Sicherheitsgründen `search_path` auf leer (`SELECT pg_catalog.set_config('search_path', '', false);`). Ruft eine Funktion der Anwendung intern eine andere Funktion oder Erweiterung **ohne Schema-Präfix** auf (z. B. `xyz(...)` statt `public.xyz(...)`), findet Postgres sie bei leerem `search_path` nicht mehr. Besonders betroffen sind Tabellen mit generierten Spalten (`GENERATED ALWAYS AS ... STORED`), die die Funktion sofort beim `CREATE TABLE` prüfen. Alle abhängigen Views, Indizes und Trigger scheitern danach mit `relation "..." does not exist`.
-
-Das ist ein Fehler im Schema der Anwendung, kein Fehler im Backup-Skript. Er träte bei jedem Standard-`pg_dump`/`psql`-Restore dieser Datenbank auf.
-
-**Manueller Workaround, falls die Datenbank vollständig wiederhergestellt werden muss:**
-
-```bash
-# 1. Betroffene Funktion mit Schema-Präfix neu anlegen (Definition der Anwendung übernehmen,
-#    nur den Aufruf von xyz(...) mit "public." qualifizieren)
-docker exec -e PGPASSWORD="$POSTGRES_PWD" "$CONTAINER" psql -U postgres -d <dbname> -c \
-  "CREATE OR REPLACE FUNCTION public.<funktionsname>(text) RETURNS text LANGUAGE sql IMMUTABLE AS \$\$ SELECT lower(public.xyz('xyz', \$1)) \$\$;"
-
-# 2. Danach den kompletten Dump erneut einspielen (die Funktion existiert jetzt korrekt,
-#    CREATE TABLE und alle abhängigen Objekte sollten diesmal durchlaufen)
-zcat /opt/db-backup/backup/$CONTAINER/all-databases-<JJJJMMDDHHMM>.sql.gz \
-    | docker exec -i -e PGPASSWORD="$POSTGRES_PWD" "$CONTAINER" psql -U postgres -d postgres
-```
-
-Dieser Workaround ist **nicht** automatisch ins Skript eingebaut (bewusste Entscheidung, um den Dump-Inhalt nicht automatisiert zu verändern) und muss bei Bedarf manuell ausgeführt werden.
+Das ist ein Fehler im Datenbankschema der Anwendung, nicht im Backup-Skript. Abhilfe: die betroffene Funktion mit Schema-Präfix (`public.<name>`) neu anlegen und den kompletten Dump danach erneut einspielen. Das Skript verändert den Dump-Inhalt bewusst nicht automatisch.
 
 ---
 
@@ -150,7 +127,7 @@ Dateiformat: `mongo-JJJJMMDDHHMM.gz` (Binärarchiv von `mongodump --archive`, ke
 ```bash
 CONTAINER=<mongo-containername>   # Containernamen anpassen
 
-zcat /opt/db-backup/backup/$CONTAINER/mongo-<JJJJMMDDHHMM>.gz \
+zcat <skriptverzeichnis>/backup/$CONTAINER/mongo-<JJJJMMDDHHMM>.gz \
     | docker exec -i "$CONTAINER" mongorestore --archive --drop
 ```
 
@@ -171,7 +148,7 @@ CONTAINER=<sqlite-containername>   # Containernamen anpassen
 docker exec "$CONTAINER" sh -c 'test -f /data/database.db && mv /data/database.db /data/database.db.bak'
 
 # Dump in eine neue, leere Datenbank einspielen
-zcat /opt/db-backup/backup/$CONTAINER/sqlite-<JJJJMMDDHHMM>.sql.gz \
+zcat <skriptverzeichnis>/backup/$CONTAINER/sqlite-<JJJJMMDDHHMM>.sql.gz \
     | docker exec -i "$CONTAINER" sqlite3 /data/database.db
 ```
 
@@ -188,7 +165,7 @@ CONTAINER=<bitwarden-containername>   # Containernamen anpassen
 docker exec "$CONTAINER" sh -c 'test -f data/db.sqlite3 && mv data/db.sqlite3 data/db.sqlite3.bak'
 
 # Dump in eine neue, leere Datenbank einspielen
-zcat /opt/db-backup/backup/$CONTAINER/bitwarden-<JJJJMMDDHHMM>.sql.gz \
+zcat <skriptverzeichnis>/backup/$CONTAINER/bitwarden-<JJJJMMDDHHMM>.sql.gz \
     | docker exec -i "$CONTAINER" sqlite3 data/db.sqlite3
 ```
 
