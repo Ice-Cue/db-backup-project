@@ -1,7 +1,8 @@
 # Anleitung: Datenbank-Backups wiederherstellen
 
-Gilt für die Backups aus `db-container-backup.sh`. Der Backup-Ordner liegt
-automatisch im selben Verzeichnis wie das Skript (Unterordner `backup/`).
+Gilt für die Backups aus `/opt/db-backup/db-container-backup.sh`. Der Backup-Ordner liegt
+automatisch im selben Verzeichnis wie das Skript (Unterordner `backup/`), also
+`/opt/db-backup/backup/<containername>/` (wenn das Skript in `/opt/db-backup/` liegt).
 
 ---
 
@@ -11,7 +12,7 @@ Das Skript hat einen eingebauten Restore-Modus, der Container und Backup-Datei a
 aus dem Backup-Ordner auflistet – kein manueller Pfad nötig:
 
 ```bash
-cd /opt/db-backup   # oder wo auch immer das Projekt liegt
+cd /opt/db-backup
 ./db-container-backup.sh restore
 ```
 
@@ -30,28 +31,11 @@ Auswahl zu überspringen (z. B. für eigene Automatisierung):
 ./db-container-backup.sh restore <containername> <pfad-zur-backup-datei>   # vollständig manuell
 ```
 
-Findet das Skript über das Docker-Compose-Label `com.docker.compose.project`, dass es zum
-Datenbank-Container weitere Container im selben Compose-Projekt gibt, zeigt es diese an und fragt
-zusätzlich:
-
-```
-Folgende Container gehören zum selben Compose-Projekt (<projektname>):
-  - app-1
-  - worker-1
-Diese Container jetzt stoppen und nach dem Restore wieder starten? (ja/nein):
-```
-
-Bei `ja` werden sie vor dem Restore gestoppt und nach Abschluss (egal ob erfolgreich oder
-fehlgeschlagen) automatisch wieder gestartet. Voraussetzung: Die Anwendung läuft per Docker Compose
-und die Container tragen das entsprechende Label (bei `docker compose up` automatisch der Fall).
-Findet sich kein Compose-Projekt oder keine weiteren Container darin, entfällt die Nachfrage und das
-Restore läuft normal weiter.
-
 **Wichtig, für alle Datenbanktypen:**
 
 - Ein Restore überschreibt bestehende Daten. Vor jedem Restore ein frisches Backup des aktuellen Zustands erstellen.
 - Wenn möglich vorher in einer Testumgebung/Testcontainer prüfen, nicht direkt live.
-- Für ein garantiert sauberes Ergebnis: Anwendungscontainer, die auf die Datenbank zugreifen, vor dem Restore stoppen (`docker stop <containername>`) und danach wieder starten — entweder manuell oder über die automatische Nachfrage im Compose-Fall (siehe oben). Das Skript trennt bei PostgreSQL zwar automatisch aktive Verbindungen, laufende Anwendungen können sich aber sofort wieder neu verbinden und den Restore stören.
+- Für ein garantiert sauberes Ergebnis: Anwendungscontainer, die auf die Datenbank zugreifen, vor dem Restore stoppen (`docker stop <containername>`) und danach wieder starten. Das Skript trennt bei PostgreSQL zwar automatisch aktive Verbindungen, laufende Anwendungen können sich aber sofort wieder neu verbinden und den Restore stören.
 - Die manuellen Befehle in den folgenden Abschnitten sind als Referenz gedacht (z. B. falls das Skript nicht verfügbar ist) und spiegeln exakt das wider, was der Restore-Modus des Skripts automatisch macht.
 
 ---
@@ -67,7 +51,7 @@ MariaDB/MySQL, PostgreSQL (ab Backups mit `--clean --if-exists`), MongoDB (mit `
 Dateiformat: `<dbname>-JJJJMMDDHHMM.sql.gz` (einzelne Datenbank) oder `all-databases-JJJJMMDDHHMM.sql.gz` (kompletter Dump aller Datenbanken).
 
 ```bash
-CONTAINER=cnc-aus-holz_at-mysql-1   # Containernamen anpassen
+CONTAINER=<mysql-containername>   # Containernamen anpassen (z. B. aus `docker ps`)
 
 # Root-Passwort aus dem Container auslesen
 MYSQL_PWD=$(docker exec "$CONTAINER" env | grep -E '^(MYSQL_ROOT_PASSWORD|MARIADB_ROOT_PASSWORD)=' | head -n1 | cut -d"=" -f2-)
@@ -79,14 +63,14 @@ DB_CLIENT=$(docker exec "$CONTAINER" sh -c 'command -v mariadb || command -v mys
 **Einzelne Datenbank wiederherstellen:**
 
 ```bash
-zcat backup/$CONTAINER/wcf-202607172141.sql.gz \
-    | docker exec -i -e MYSQL_PWD="$MYSQL_PWD" "$CONTAINER" "$DB_CLIENT" -u root wcf
+zcat /opt/db-backup/backup/$CONTAINER/<dbname>-<JJJJMMDDHHMM>.sql.gz \
+    | docker exec -i -e MYSQL_PWD="$MYSQL_PWD" "$CONTAINER" "$DB_CLIENT" -u root <dbname>
 ```
 
 **Kompletten `all-databases`-Dump wiederherstellen** (Dump enthält bereits `CREATE DATABASE`/`USE`, daher ohne Datenbanknamen einspielen):
 
 ```bash
-zcat backup/$CONTAINER/all-databases-202607172158.sql.gz \
+zcat /opt/db-backup/backup/$CONTAINER/all-databases-<JJJJMMDDHHMM>.sql.gz \
     | docker exec -i -e MYSQL_PWD="$MYSQL_PWD" "$CONTAINER" "$DB_CLIENT" -u root
 ```
 
@@ -97,7 +81,7 @@ zcat backup/$CONTAINER/all-databases-202607172158.sql.gz \
 Dateiformat: `<dbname>-JJJJMMDDHHMM.sql.gz` (einzelne Datenbank, erzeugt mit `pg_dump --clean --if-exists`) oder `all-databases-JJJJMMDDHHMM.sql.gz` (kompletter Cluster-Dump, erzeugt mit `pg_dumpall --clean --if-exists`).
 
 ```bash
-CONTAINER=bigbluebutton-server-postgres-1   # Containernamen anpassen
+CONTAINER=<postgres-containername>   # Containernamen anpassen (z. B. aus `docker ps`)
 
 POSTGRES_PWD=$(docker exec "$CONTAINER" env | grep -E '^POSTGRES_PASSWORD=' | head -n1 | cut -d"=" -f2-)
 ```
@@ -117,41 +101,42 @@ docker exec -e PGPASSWORD="$POSTGRES_PWD" "$CONTAINER" psql -U postgres -d postg
 **Einzelne Datenbank wiederherstellen:**
 
 ```bash
-zcat backup/$CONTAINER/<dbname>-202607172141.sql.gz \
+zcat /opt/db-backup/backup/$CONTAINER/<dbname>-<JJJJMMDDHHMM>.sql.gz \
     | docker exec -i -e PGPASSWORD="$POSTGRES_PWD" "$CONTAINER" psql -U postgres -d <dbname>
 ```
 
 **Kompletten `all-databases`-Dump wiederherstellen** (enthält `\connect`-Befehle für jede Datenbank):
 
 ```bash
-zcat backup/$CONTAINER/all-databases-202607172234.sql.gz \
+zcat /opt/db-backup/backup/$CONTAINER/all-databases-<JJJJMMDDHHMM>.sql.gz \
     | docker exec -i -e PGPASSWORD="$POSTGRES_PWD" "$CONTAINER" psql -U postgres -d postgres
 ```
 
-### Bekannte Einschränkung: BigBlueButton-Datenbank `bbb_graphql`
+### Bekannte Einschränkung: Datenbank mit nicht schema-qualifizierten Funktionen
 
-Beim Restore von `bbb_graphql` (Teil des `all-databases`-Dumps von `bigbluebutton-server-postgres-1`) schlägt die Erstellung der Tabelle `user` fehl:
+Manche Anwendungsdatenbanken lassen sich mit einem Standard-Restore nicht vollständig einspielen. Typisches Fehlerbild beim Anlegen einer Tabelle:
 
 ```
-ERROR:  function unaccent(unknown, text) does not exist
-CONTEXT:  SQL function "immutable_lower_unaccent" during inlining
+ERROR:  function xyz(unknown, text) does not exist
+CONTEXT:  SQL function "xyz_wrapper" during inlining
 ```
 
-**Ursache (bestätigt):** `pg_dump` setzt zu Beginn jedes Datenbank-Abschnitts aus Sicherheitsgründen `search_path` auf leer (`SELECT pg_catalog.set_config('search_path', '', false);`). Die BigBlueButton-eigene Funktion `public.immutable_lower_unaccent` ruft intern `unaccent('unaccent', $1)` auf, **ohne** sie mit `public.` zu qualifizieren. Bei leerem `search_path` findet Postgres diesen unqualifizierten Aufruf nicht mehr. Die Tabelle `user` hat generierte Spalten (`GENERATED ALWAYS AS ... STORED`), die diese Funktion sofort beim `CREATE TABLE` auf Immutabilität prüfen – dabei schlägt es fehl. Alle Views, Indizes und Trigger, die von `user` abhängen, scheitern danach in Folge mit `relation "public.user" does not exist`.
+**Ursache:** `pg_dump` setzt zu Beginn jedes Datenbank-Abschnitts aus Sicherheitsgründen `search_path` auf leer (`SELECT pg_catalog.set_config('search_path', '', false);`). Ruft eine Funktion der Anwendung intern eine andere Funktion oder Erweiterung **ohne Schema-Präfix** auf (z. B. `xyz(...)` statt `public.xyz(...)`), findet Postgres sie bei leerem `search_path` nicht mehr. Besonders betroffen sind Tabellen mit generierten Spalten (`GENERATED ALWAYS AS ... STORED`), die die Funktion sofort beim `CREATE TABLE` prüfen. Alle abhängigen Views, Indizes und Trigger scheitern danach mit `relation "..." does not exist`.
 
-Das ist ein latenter Fehler im BigBlueButton-eigenen Datenbankschema (fehlende Schema-Qualifizierung), kein Fehler im Backup-Skript. Er träte bei jedem Standard-`pg_dump`/`psql`-Restore dieser Datenbank auf, unabhängig vom hier verwendeten Skript.
+Das ist ein Fehler im Schema der Anwendung, kein Fehler im Backup-Skript. Er träte bei jedem Standard-`pg_dump`/`psql`-Restore dieser Datenbank auf.
 
-**Manueller Workaround, falls `bbb_graphql` tatsächlich vollständig wiederhergestellt werden muss:**
+**Manueller Workaround, falls die Datenbank vollständig wiederhergestellt werden muss:**
 
 ```bash
-# 1. Funktion korrigieren (public. vor unaccent ergänzen)
-docker exec -e PGPASSWORD="$POSTGRES_PWD" bigbluebutton-server-postgres-1 psql -U postgres -d bbb_graphql -c \
-  "CREATE OR REPLACE FUNCTION public.immutable_lower_unaccent(text) RETURNS text LANGUAGE sql IMMUTABLE AS \$\$ SELECT lower(public.unaccent('unaccent', \$1)) \$\$;"
+# 1. Betroffene Funktion mit Schema-Präfix neu anlegen (Definition der Anwendung übernehmen,
+#    nur den Aufruf von xyz(...) mit "public." qualifizieren)
+docker exec -e PGPASSWORD="$POSTGRES_PWD" "$CONTAINER" psql -U postgres -d <dbname> -c \
+  "CREATE OR REPLACE FUNCTION public.<funktionsname>(text) RETURNS text LANGUAGE sql IMMUTABLE AS \$\$ SELECT lower(public.xyz('xyz', \$1)) \$\$;"
 
-# 2. Danach den kompletten Dump erneut einspielen (Funktion existiert jetzt korrekt,
-#    CREATE TABLE "user" und alle abhängigen Objekte sollten diesmal durchlaufen)
-zcat backup/bigbluebutton-server-postgres-1/all-databases-*.sql.gz \
-    | docker exec -i -e PGPASSWORD="$POSTGRES_PWD" bigbluebutton-server-postgres-1 psql -U postgres -d postgres
+# 2. Danach den kompletten Dump erneut einspielen (die Funktion existiert jetzt korrekt,
+#    CREATE TABLE und alle abhängigen Objekte sollten diesmal durchlaufen)
+zcat /opt/db-backup/backup/$CONTAINER/all-databases-<JJJJMMDDHHMM>.sql.gz \
+    | docker exec -i -e PGPASSWORD="$POSTGRES_PWD" "$CONTAINER" psql -U postgres -d postgres
 ```
 
 Dieser Workaround ist **nicht** automatisch ins Skript eingebaut (bewusste Entscheidung, um den Dump-Inhalt nicht automatisiert zu verändern) und muss bei Bedarf manuell ausgeführt werden.
@@ -165,7 +150,7 @@ Dateiformat: `mongo-JJJJMMDDHHMM.gz` (Binärarchiv von `mongodump --archive`, ke
 ```bash
 CONTAINER=<mongo-containername>   # Containernamen anpassen
 
-zcat backup/$CONTAINER/mongo-202607172234.gz \
+zcat /opt/db-backup/backup/$CONTAINER/mongo-<JJJJMMDDHHMM>.gz \
     | docker exec -i "$CONTAINER" mongorestore --archive --drop
 ```
 
@@ -186,7 +171,7 @@ CONTAINER=<sqlite-containername>   # Containernamen anpassen
 docker exec "$CONTAINER" sh -c 'test -f /data/database.db && mv /data/database.db /data/database.db.bak'
 
 # Dump in eine neue, leere Datenbank einspielen
-zcat backup/$CONTAINER/sqlite-202607172234.sql.gz \
+zcat /opt/db-backup/backup/$CONTAINER/sqlite-<JJJJMMDDHHMM>.sql.gz \
     | docker exec -i "$CONTAINER" sqlite3 /data/database.db
 ```
 
@@ -203,7 +188,7 @@ CONTAINER=<bitwarden-containername>   # Containernamen anpassen
 docker exec "$CONTAINER" sh -c 'test -f data/db.sqlite3 && mv data/db.sqlite3 data/db.sqlite3.bak'
 
 # Dump in eine neue, leere Datenbank einspielen
-zcat backup/$CONTAINER/bitwarden-202607172234.sql.gz \
+zcat /opt/db-backup/backup/$CONTAINER/bitwarden-<JJJJMMDDHHMM>.sql.gz \
     | docker exec -i "$CONTAINER" sqlite3 data/db.sqlite3
 ```
 
@@ -212,7 +197,7 @@ zcat backup/$CONTAINER/bitwarden-202607172234.sql.gz \
 ## Kurzreferenz: Backup-Verzeichnisstruktur
 
 ```
-<Projektverzeichnis>/backup/<containername>/<dbname-oder-all-databases>-JJJJMMDDHHMM.sql.gz
+<Skript-Verzeichnis>/backup/<containername>/<dbname-oder-all-databases>-JJJJMMDDHHMM.sql.gz
 ```
 
 Bei Fehlschlägen erzeugt das Backup-Skript zusätzlich eine `.err.log`-Datei im selben Verzeichnis mit der Fehlermeldung des jeweiligen Dump-Tools.
